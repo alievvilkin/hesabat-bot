@@ -4,7 +4,7 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 require('dotenv').config();
 
-// Express Server (Render Port Tələbi Üçün)
+// 1. Express Server (Render Portu Üçün)
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -16,7 +16,7 @@ app.listen(PORT, () => {
     console.log(`🌐 Web server ${PORT} portunda dinlənilir...`);
 });
 
-// Discord Bot Müştərisi
+// 2. Discord Bot Client
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
@@ -25,18 +25,24 @@ const client = new Client({
     ] 
 });
 
-// Google Private Key Formatı
-const privateKey = process.env.GOOGLE_PRIVATE_KEY 
-    ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') 
-    : '';
-
-const serviceAccountAuth = new JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: privateKey,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
-
-const doc = new GoogleSpreadsheet(process.env.SPREADSHEET_ID, serviceAccountAuth);
+// 3. Google Auth Hazırlığı (Xətaya qarşı təhlükəsiz)
+function getGoogleDoc() {
+    try {
+        let key = process.env.GOOGLE_PRIVATE_KEY || '';
+        if (key.includes('\\n')) {
+            key = key.replace(/\\n/g, '\n');
+        }
+        const serviceAccountAuth = new JWT({
+            email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+            key: key,
+            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+        });
+        return new GoogleSpreadsheet(process.env.SPREADSHEET_ID, serviceAccountAuth);
+    } catch (err) {
+        console.error('❌ Google Auth Xətası:', err);
+        return null;
+    }
+}
 
 client.once('ready', async () => {
     console.log(`🤖 Bot ${client.user.tag} adı ilə aktivdir!`);
@@ -96,6 +102,10 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ ephemeral: true });
 
         try {
+            const doc = getGoogleDoc();
+            if (!doc) {
+                return await interaction.editReply({ content: '❌ Google Sheets bağlantı xətası!' });
+            }
             await doc.loadInfo();
             const sheet = doc.sheetsByTitle['Bot_Hesabatları'] || doc.sheetsByIndex[0];
 
@@ -118,19 +128,10 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Bot Giriş Xətalarını Tutmaq Üçün
-// Bot Giriş Xətalarını Tutmaq Üçün
-console.log('🔑 Discord Token Yoxlanılır...');
-
-if (!process.env.DISCORD_TOKEN) {
-    console.error('❌ XƏTA: DISCORD_TOKEN tapılmadı! Render Environment Variables bölməsini yoxlayın.');
-} else {
-    client.login(process.env.DISCORD_TOKEN)
-        .then(() => {
-            console.log('✅ Discord bağlantısı uğurla quruldu!');
-        })
-        .catch(err => {
-            console.error('❌ DISCORD LOGIN XƏTASI BAŞ VERDİ:');
-            console.error(err);
-        });
-}
+// 4. Bot Login (Işə salma)
+console.log('🔑 Discord Bot Login Olunur...');
+client.login(process.env.DISCORD_TOKEN).then(() => {
+    console.log('⚡ client.login uğurla çağırıldı!');
+}).catch(err => {
+    console.error('❌ Login Xətası:', err);
+});
