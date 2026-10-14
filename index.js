@@ -25,7 +25,7 @@ const client = new Client({
     ] 
 });
 
-// Google Private Key Formatı (Render multi-line dəstəyi üçün)
+// Google Private Key Formatı
 const privateKey = process.env.GOOGLE_PRIVATE_KEY 
     ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') 
     : '';
@@ -118,4 +118,12 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// Bot Giriş Xətalarını Tutmaq Üçün
+console.log('🔑 Discord Token Yoxlanılır...');
+if (!process.env.DISCORD_TOKEN) {
+    console.error('❌ XƏTA: DISCORD_TOKEN tapılmadı! Environment Variables bölməsini yoxlayın.');
+} else {
+    client.login(process.env.DISCORD_TOKEN).catch(err => {
+        console.error('❌ Discord Login Xətası:', err);
+    });
+}
