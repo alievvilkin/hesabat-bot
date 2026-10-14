@@ -128,10 +128,13 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 4. Bot Login (Işə salma)
-console.log('🔑 Discord Bot Login Olunur...');
-client.login(process.env.DISCORD_TOKEN).then(() => {
-    console.log('⚡ client.login uğurla çağırıldı!');
-}).catch(err => {
-    console.error('❌ Login Xətası:', err);
-});
+// 4. Bot Login (İşə salma)
+(async () => {
+    try {
+        console.log('🔑 Discord Bot Login Olunur...');
+        await client.login(process.env.DISCORD_TOKEN);
+        console.log('⚡ client.login uğurla çağırıldı!');
+    } catch (err) {
+        console.error('❌ DISCORD LOGIN XƏTASI:', err);
+    }
+})();
