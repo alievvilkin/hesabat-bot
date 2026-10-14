@@ -7,7 +7,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Discord Bot Client
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
@@ -16,7 +15,6 @@ const client = new Client({
     ] 
 });
 
-// 2. Google Auth Təhlükəsiz Quraşdırma
 function getGoogleDoc() {
     try {
         let key = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -36,7 +34,7 @@ function getGoogleDoc() {
 }
 
 client.once('ready', async () => {
-    console.log(`🤖 Bot ${client.user.tag} adı ilə uğurla aktiv oldu!`);
+    console.log(`🤖 Bot ${client.user.tag} adı ilə UĞURLA AKTİV OLDU!`);
     
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -119,16 +117,31 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 3. Web Server və Discord Botunun Birlikdə Başladılması
-app.get('/', (req, res) => {
-    res.send('Bot 7/24 Aktifdir!');
-});
+app.get('/', (req, res) => res.send('Bot 7/24 Aktifdir!'));
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`🌐 Web server ${PORT} portunda dinlənilir...`);
-    console.log('🔑 Discord Botuna bağlanılır...');
     
-    client.login(process.env.DISCORD_TOKEN)
-        .then(() => console.log('⚡ Discord API bağlantısı quruldu!'))
-        .catch(err => console.error('❌ DISCORD LOGIN XƏTASI:', err));
+    const token = (process.env.DISCORD_TOKEN || '').trim();
+    console.log(`🔑 Token Uzunluğu: ${token.length} simvol`);
+
+    if (!token) {
+        console.error('❌ DISCORD_TOKEN TAPILMADI!');
+        return;
+    }
+
+    // 10 Saniyəlik Timeout Nəzarəti
+    const timeout = setTimeout(() => {
+        console.error('⚠️ TIMEOUT: Discord Gateway 10 saniyə ərzində cavab vermədi!');
+    }, 10000);
+
+    try {
+        console.log('🔑 Discord API-yə qoşulunur...');
+        await client.login(token);
+        clearTimeout(timeout);
+        console.log('⚡ Discord API bağlantısı tam quruldu!');
+    } catch (err) {
+        clearTimeout(timeout);
+        console.error('❌ DISCORD LOGIN XƏTASI:', err);
+    }
 });
