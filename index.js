@@ -4,19 +4,10 @@ const { JWT } = require('google-auth-library');
 const express = require('express');
 require('dotenv').config();
 
-// 1. Express Server (Render Portu Üçün)
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-    res.send('Bot 7/24 Aktifdir!');
-});
-
-app.listen(PORT, () => {
-    console.log(`🌐 Web server ${PORT} portunda dinlənilir...`);
-});
-
-// 2. Discord Bot Client
+// 1. Discord Bot Client
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
@@ -25,7 +16,7 @@ const client = new Client({
     ] 
 });
 
-// 3. Google Auth Hazırlığı (Xətaya qarşı təhlükəsiz)
+// 2. Google Auth Təhlükəsiz Quraşdırma
 function getGoogleDoc() {
     try {
         let key = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -45,7 +36,7 @@ function getGoogleDoc() {
 }
 
 client.once('ready', async () => {
-    console.log(`🤖 Bot ${client.user.tag} adı ilə aktivdir!`);
+    console.log(`🤖 Bot ${client.user.tag} adı ilə uğurla aktiv oldu!`);
     
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -55,7 +46,7 @@ client.once('ready', async () => {
         );
         console.log('✅ Slash komandaları (/hesabat) uğurla qeydiyyata alındı!');
     } catch (err) {
-        console.error('❌ Slash komandaları qeydiyyata alınarkən xəta baş verdi:', err);
+        console.error('❌ Slash komandaları xətası:', err);
     }
 });
 
@@ -128,13 +119,16 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 4. Bot Login (İşə salma)
-(async () => {
-    try {
-        console.log('🔑 Discord Bot Login Olunur...');
-        await client.login(process.env.DISCORD_TOKEN);
-        console.log('⚡ client.login uğurla çağırıldı!');
-    } catch (err) {
-        console.error('❌ DISCORD LOGIN XƏTASI:', err);
-    }
-})();
+// 3. Web Server və Discord Botunun Birlikdə Başladılması
+app.get('/', (req, res) => {
+    res.send('Bot 7/24 Aktifdir!');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server ${PORT} portunda dinlənilir...`);
+    console.log('🔑 Discord Botuna bağlanılır...');
+    
+    client.login(process.env.DISCORD_TOKEN)
+        .then(() => console.log('⚡ Discord API bağlantısı quruldu!'))
+        .catch(err => console.error('❌ DISCORD LOGIN XƏTASI:', err));
+});
