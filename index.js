@@ -1,8 +1,22 @@
 const { Client, GatewayIntentBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, REST, Routes } = require('discord.js');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
+const express = require('express');
 require('dotenv').config();
 
+// Express Server (Render Port Tələbi Üçün)
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Bot 7/24 Aktifdir!');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server ${PORT} portunda dinlənilir...`);
+});
+
+// Discord Bot Müştərisi
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
@@ -11,10 +25,15 @@ const client = new Client({
     ] 
 });
 
+// Google Private Key Formatı (Render multi-line dəstəyi üçün)
+const privateKey = process.env.GOOGLE_PRIVATE_KEY 
+    ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') 
+    : '';
+
 const serviceAccountAuth = new JWT({
-  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: privateKey,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 
 const doc = new GoogleSpreadsheet(process.env.SPREADSHEET_ID, serviceAccountAuth);
@@ -22,11 +41,16 @@ const doc = new GoogleSpreadsheet(process.env.SPREADSHEET_ID, serviceAccountAuth
 client.once('ready', async () => {
     console.log(`🤖 Bot ${client.user.tag} adı ilə aktivdir!`);
     
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-    await rest.put(
-        Routes.applicationCommands(client.user.id),
-        { body: [{ name: 'hesabat', description: 'Gündəlik iş hesabatı formasını açır' }] }
-    );
+    try {
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: [{ name: 'hesabat', description: 'Gündəlik iş hesabatı formasını açır' }] }
+        );
+        console.log('✅ Slash komandaları (/hesabat) uğurla qeydiyyata alındı!');
+    } catch (err) {
+        console.error('❌ Slash komandaları qeydiyyata alınarkən xəta baş verdi:', err);
+    }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -88,15 +112,10 @@ client.on('interactionCreate', async interaction => {
                 content: '✅ Hesabatınız Google Sheets cədvəlinə əlavə olundu!\n📸 Əgər skrinşot/şəkil göndərmək istəyirsinizsə, şəkli birbaşa bota və ya bu kanala atın.' 
             });
         } catch (error) {
-            console.error(error);
+            console.error('Google Sheets Xətası:', error);
             await interaction.editReply({ content: '❌ Cədvələ yazılarkən xəta baş verdi.' });
         }
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-
-const express = require('express');
-const app = express();
-app.get('/', (req, res) => res.send('Bot aktivdir!'));
-app.listen(process.env.PORT || 3000);
