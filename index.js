@@ -119,11 +119,18 @@ client.on('interactionCreate', async interaction => {
 });
 
 // Bot Giriş Xətalarını Tutmaq Üçün
+// Bot Giriş Xətalarını Tutmaq Üçün
 console.log('🔑 Discord Token Yoxlanılır...');
+
 if (!process.env.DISCORD_TOKEN) {
-    console.error('❌ XƏTA: DISCORD_TOKEN tapılmadı! Environment Variables bölməsini yoxlayın.');
+    console.error('❌ XƏTA: DISCORD_TOKEN tapılmadı! Render Environment Variables bölməsini yoxlayın.');
 } else {
-    client.login(process.env.DISCORD_TOKEN).catch(err => {
-        console.error('❌ Discord Login Xətası:', err);
-    });
+    client.login(process.env.DISCORD_TOKEN)
+        .then(() => {
+            console.log('✅ Discord bağlantısı uğurla quruldu!');
+        })
+        .catch(err => {
+            console.error('❌ DISCORD LOGIN XƏTASI BAŞ VERDİ:');
+            console.error(err);
+        });
 }
