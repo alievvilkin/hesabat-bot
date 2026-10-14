@@ -7,14 +7,14 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 1. Discord Bot Client (Yalnız Guilds Intent-i ilə)
 const client = new Client({ 
     intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent 
+        GatewayIntentBits.Guilds
     ] 
 });
 
+// 2. Google Auth Təhlükəsiz Quraşdırma
 function getGoogleDoc() {
     try {
         let key = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -130,7 +130,6 @@ app.listen(PORT, async () => {
         return;
     }
 
-    // 10 Saniyəlik Timeout Nəzarəti
     const timeout = setTimeout(() => {
         console.error('⚠️ TIMEOUT: Discord Gateway 10 saniyə ərzində cavab vermədi!');
     }, 10000);
