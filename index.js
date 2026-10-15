@@ -20,10 +20,19 @@ process.on('uncaughtException', err => console.error('❌ Uncaught Exception:', 
 // ================== GOOGLE SHEETS ==================
 let docCache = null;
 
+// Açar necə yapışdırılsa da (Enter, boşluq, \n, dırnaq) standart PEM formatına salınır
+function normalizePrivateKey(raw) {
+    const body = (raw || '')
+        .replace(/\\n/g, '')
+        .replace(/-----(BEGIN|END) PRIVATE KEY-----/g, '')
+        .replace(/["'\s]/g, '');
+    if (!body) throw new Error('GOOGLE_PRIVATE_KEY boşdur!');
+    return `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----\n`;
+}
+
 async function getSheet() {
     if (!docCache) {
-        let key = process.env.GOOGLE_PRIVATE_KEY || '';
-        if (key.includes('\\n')) key = key.replace(/\\n/g, '\n');
+        const key = normalizePrivateKey(process.env.GOOGLE_PRIVATE_KEY);
 
         const auth = new JWT({
             email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
