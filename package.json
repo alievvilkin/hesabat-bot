@@ -1,6 +1,6 @@
 {
   "name": "hesabat-bot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -13,6 +13,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "google-auth-library": "^9.6.3",
-    "google-spreadsheet": "^4.1.1"
+    "google-spreadsheet": "^4.1.1",
+    "node-cron": "^3.0.3"
   }
 }
