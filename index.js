@@ -5,17 +5,69 @@ const {
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
+const cron = require('node-cron');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // ================== KONFİQ ==================
 const PORT = process.env.PORT || 3000;
 const TOKEN = (process.env.DISCORD_TOKEN || '').trim();
 const SHEET_TITLE = 'Bot_Hesabatları';
-const DEBUG = process.env.DEBUG === '1'; // Render-də DEBUG=1 yazsan, ətraflı log çıxır
+const DEBUG = process.env.DEBUG === '1';
+
+// Xatırlatma ayarları (.env-dən)
+const REPORT_CHANNEL_ID = (process.env.REPORT_CHANNEL_ID || '').trim(); // xəbərdarlıq yazılacaq kanal
+const TEAM_ROLE_ID = (process.env.TEAM_ROLE_ID || '').trim();           // hesabat yazmalı olan rol
+const SKIP_WEEKENDS = process.env.SKIP_WEEKENDS === '1';                // 1 = şənbə/bazar yoxlanmır
+const REMINDER_CRON = process.env.REMINDER_CRON || '59 23 * * *';       // hər gün 23:59
+const TIMEZONE = 'Asia/Baku';
+
+// Göndərənlərin qeydi (server restart olsa da itmir)
+const SUBMISSIONS_FILE = path.join(__dirname, 'submissions.json');
 
 // Qlobal xətalar botu öldürməsin
 process.on('unhandledRejection', err => console.error('❌ Unhandled Rejection:', err));
 process.on('uncaughtException', err => console.error('❌ Uncaught Exception:', err));
+
+// ================== TARİX KÖMƏKÇİLƏRİ ==================
+// Bakı vaxtı ilə bugünkü tarix: "2026-10-15"
+function todayKey() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE });
+}
+
+function isWeekendBaku() {
+    const day = new Date().toLocaleDateString('en-US', { timeZone: TIMEZONE, weekday: 'short' });
+    return day === 'Sat' || day === 'Sun';
+}
+
+// ================== GÖNDƏRƏNLƏRİN QEYDİ ==================
+function loadSubmissions() {
+    try {
+        return JSON.parse(fs.readFileSync(SUBMISSIONS_FILE, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+
+function saveSubmissions(data) {
+    // 30 gündən köhnə qeydləri sil
+    const keys = Object.keys(data).sort();
+    while (keys.length > 30) delete data[keys.shift()];
+    fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(data, null, 2));
+}
+
+function markSubmitted(userId) {
+    const data = loadSubmissions();
+    const key = todayKey();
+    if (!data[key]) data[key] = [];
+    if (!data[key].includes(userId)) data[key].push(userId);
+    saveSubmissions(data);
+}
+
+function submittedToday() {
+    return new Set(loadSubmissions()[todayKey()] || []);
+}
 
 // ================== GOOGLE SHEETS ==================
 let docCache = null;
@@ -48,7 +100,12 @@ async function getSheet() {
 }
 
 // ================== DISCORD CLIENT ==================
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers // rol üzvlərini görmək üçün (Developer Portal-da aktiv edilməlidir)
+    ]
+});
 
 if (DEBUG) {
     client.on('debug', m => {
@@ -59,7 +116,56 @@ client.on('error', e => console.error('[DISCORD ERROR]', e));
 client.on('warn', w => console.warn('[DISCORD WARN]', w));
 client.rest.on('rateLimited', r => console.warn('[RATELIMIT]', r));
 
-// ready / clientReady — hər iki versiyaya uyğun, yalnız 1 dəfə işləyir
+// ================== XATIRLATMA ==================
+async function checkMissingReports({ manual = false } = {}) {
+    if (!REPORT_CHANNEL_ID || !TEAM_ROLE_ID) {
+        console.error('❌ REPORT_CHANNEL_ID və ya TEAM_ROLE_ID .env-də yoxdur, xatırlatma işləmir.');
+        return '❌ REPORT_CHANNEL_ID və ya TEAM_ROLE_ID təyin edilməyib.';
+    }
+    if (!manual && SKIP_WEEKENDS && isWeekendBaku()) {
+        console.log('📅 Həftəsonu, yoxlama ötürüldü.');
+        return 'Həftəsonu, yoxlama ötürüldü.';
+    }
+
+    const channel = await client.channels.fetch(REPORT_CHANNEL_ID);
+    const guild = channel.guild;
+    await guild.members.fetch(); // bütün üzvləri yüklə
+
+    const role = guild.roles.cache.get(TEAM_ROLE_ID);
+    if (!role) {
+        console.error('❌ TEAM_ROLE_ID ilə rol tapılmadı.');
+        return '❌ Rol tapılmadı.';
+    }
+
+    const done = submittedToday();
+    const missing = role.members.filter(m => !m.user.bot && !done.has(m.id));
+
+    if (missing.size === 0) {
+        await channel.send('✅ Bu gün komandada hamı hesabatını göndərib. Təşəkkürlər!');
+        console.log('✅ Hamı hesabat göndərib.');
+        return 'Hamı göndərib.';
+    }
+
+    const header = '⏰ **Bu gün hesabat göndərməyənlər:**\n';
+    const footer = '\n\nZəhmət olmasa hesabatı gecikdirməyin. `/hesabat` yazaraq göndərin.';
+    const mentions = missing.map(m => `<@${m.id}>`);
+
+    // Discord limiti: 2000 simvol — lazım olsa bir neçə mesaja böl
+    let chunk = header;
+    for (const mention of mentions) {
+        if ((chunk + mention + ' ' + footer).length > 1900) {
+            await channel.send({ content: chunk, allowedMentions: { users: missing.map(m => m.id) } });
+            chunk = '';
+        }
+        chunk += mention + ' ';
+    }
+    await channel.send({ content: chunk + footer, allowedMentions: { users: missing.map(m => m.id) } });
+
+    console.log(`⏰ Xatırlatma göndərildi: ${missing.size} nəfər`);
+    return `${missing.size} nəfər etiketləndi.`;
+}
+
+// ================== READY ==================
 let readyHandled = false;
 async function onReady() {
     if (readyHandled) return;
@@ -69,14 +175,26 @@ async function onReady() {
     try {
         const rest = new REST({ version: '10' }).setToken(TOKEN);
         await rest.put(Routes.applicationCommands(client.user.id), {
-            body: [{ name: 'hesabat', description: 'Gündəlik iş hesabatı formasını açır' }]
+            body: [
+                { name: 'hesabat', description: 'Gündəlik iş hesabatı formasını açır' },
+                {
+                    name: 'hesabat-yoxla',
+                    description: 'Bu gün hesabat göndərməyənləri indi etiketlə (yalnız admin)',
+                    default_member_permissions: '8' // Administrator
+                }
+            ]
         });
-        console.log('✅ /hesabat komandası qeydiyyata alındı');
+        console.log('✅ /hesabat və /hesabat-yoxla komandaları qeydiyyata alındı');
     } catch (err) {
         console.error('❌ Slash komanda xətası:', err);
     }
+
+    // Hər gün 23:59 (Bakı vaxtı) avtomatik yoxlama
+    cron.schedule(REMINDER_CRON, () => {
+        checkMissingReports().catch(err => console.error('❌ Xatırlatma xətası:', err));
+    }, { timezone: TIMEZONE });
+    console.log(`⏰ Gündəlik xatırlatma aktivdir: "${REMINDER_CRON}" (${TIMEZONE})`);
 }
-client.once('ready', onReady);
 client.once('clientReady', onReady);
 
 // ================== INTERACTIONS ==================
@@ -142,6 +260,13 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
+        // /hesabat-yoxla -> indi yoxla (test üçün)
+        if (interaction.isChatInputCommand() && interaction.commandName === 'hesabat-yoxla') {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            const result = await checkMissingReports({ manual: true });
+            return await interaction.editReply(`Yoxlama tamamlandı: ${result}`);
+        }
+
         // Modal submit -> Google Sheets
         if (interaction.isModalSubmit() && interaction.customId === 'hesabatModal') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -164,6 +289,8 @@ client.on('interactionCreate', async interaction => {
                     'Problemlər': problem
                 });
 
+                markSubmitted(interaction.user.id); // bu gün göndərdi kimi qeyd et
+
                 await interaction.editReply('✅ Hesabatınız Google Sheets cədvəlinə əlavə olundu!');
                 console.log(`📝 Hesabat yazıldı: ${username}`);
             } catch (error) {
@@ -177,7 +304,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// ================== WEB SERVER (Render üçün) ==================
+// ================== WEB SERVER ==================
 const app = express();
 app.get('/', (req, res) => {
     res.send(client.isReady() ? `✅ Bot online: ${client.user.tag}` : '⏳ Bot hələ Discord-a qoşulmayıb');
@@ -194,7 +321,7 @@ async function diagnoseGateway() {
 
         if (r.status === 401) console.error('❌ TOKEN SƏHVDİR! Developer Portal-dan yeni token al.');
         if (r.status === 429 || body.includes('1015')) {
-            console.error('❌ Bu serverin IP-si Discord tərəfindən BLOKLANIB (Cloudflare). Redeploy et və ya hostinqi dəyiş.');
+            console.error('❌ Bu serverin IP-si Discord tərəfindən BLOKLANIB (Cloudflare).');
         }
     } catch (err) {
         console.error('❌ Discord-a şəbəkə bağlantısı yoxdur:', err.message);
