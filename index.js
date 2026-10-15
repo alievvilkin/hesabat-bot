@@ -88,31 +88,54 @@ client.on('interactionCreate', async interaction => {
                 .setCustomId('hesabatModal')
                 .setTitle('Gündəlik İş Hesabatı');
 
-            const workInput = new TextInputBuilder()
-                .setCustomId('workInput')
-                .setLabel('Görülən İşlər')
-                .setStyle(TextInputStyle.Paragraph)
+            // 1. Tarix (manual — gecikmiş hesabat üçün)
+            const tarixInput = new TextInputBuilder()
+                .setCustomId('tarixInput')
+                .setLabel('Tarix')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('məs: 14.10.2026')
                 .setRequired(true)
-                .setMaxLength(2000);
+                .setMaxLength(20);
 
+            // 2. Ofis + saat aralığı (tək sahədə)
+            const ofisInput = new TextInputBuilder()
+                .setCustomId('ofisInput')
+                .setLabel('Ofisə getdin? (Xeyr / saat aralığı)')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('məs: Xeyr  və ya  10:00-18:00')
+                .setRequired(true)
+                .setMaxLength(40);
+
+            // 3. Neçə saat işlədi
             const hoursInput = new TextInputBuilder()
                 .setCustomId('hoursInput')
-                .setLabel('Sərf Olunan Vaxt (Saat)')
+                .setLabel('Neçə saat işlədin')
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('məs: 5')
                 .setRequired(true)
                 .setMaxLength(20);
 
+            // 4. Nə işlədi
+            const workInput = new TextInputBuilder()
+                .setCustomId('workInput')
+                .setLabel('Nə işlədin')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+                .setMaxLength(2000);
+
+            // 5. Problem / Qeyd (opsional)
             const problemInput = new TextInputBuilder()
                 .setCustomId('problemInput')
-                .setLabel('Problem / Red Flag')
+                .setLabel('Problem / Qeyd')
                 .setStyle(TextInputStyle.Paragraph)
                 .setRequired(false)
                 .setMaxLength(1000);
 
             modal.addComponents(
-                new ActionRowBuilder().addComponents(workInput),
+                new ActionRowBuilder().addComponents(tarixInput),
+                new ActionRowBuilder().addComponents(ofisInput),
                 new ActionRowBuilder().addComponents(hoursInput),
+                new ActionRowBuilder().addComponents(workInput),
                 new ActionRowBuilder().addComponents(problemInput)
             );
 
@@ -123,23 +146,22 @@ client.on('interactionCreate', async interaction => {
         if (interaction.isModalSubmit() && interaction.customId === 'hesabatModal') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-            const work = interaction.fields.getTextInputValue('workInput');
+            const tarix = interaction.fields.getTextInputValue('tarixInput');
+            const ofis = interaction.fields.getTextInputValue('ofisInput');
             const hours = interaction.fields.getTextInputValue('hoursInput');
+            const work = interaction.fields.getTextInputValue('workInput');
             const problem = interaction.fields.getTextInputValue('problemInput') || 'Yoxdur';
             const username = interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
-
-            const now = new Date();
-            const tarix = now.toLocaleDateString('az-AZ', { timeZone: 'Asia/Baku' });
 
             try {
                 const sheet = await getSheet();
                 await sheet.addRow({
                     'Tarix': tarix,
                     'Adı': username,
-                    'İşlənilənlər': work,
+                    'Ofis / Saat aralığı': ofis,
                     'İşləmə Saatı': hours,
-                    'Problemlər': problem,
-                    'Şəkil Linki': 'Şəkil yüklənməyib'
+                    'İşlənilənlər': work,
+                    'Problemlər': problem
                 });
 
                 await interaction.editReply('✅ Hesabatınız Google Sheets cədvəlinə əlavə olundu!');
