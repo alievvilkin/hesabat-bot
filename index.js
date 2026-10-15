@@ -121,10 +121,7 @@ async function checkMissingReports({ manual = false } = {}) {
         console.error('❌ REPORT_CHANNEL_ID və ya TEAM_ROLE_ID .env-də yoxdur, xatırlatma işləmir.');
         return '❌ REPORT_CHANNEL_ID və ya TEAM_ROLE_ID təyin edilməyib.';
     }
-    if (!manual && SKIP_WEEKENDS && isWeekendBaku()) {
-        console.log('📅 Həftəsonu, yoxlama ötürüldü.');
-        return 'Həftəsonu, yoxlama ötürüldü.';
-    }
+    
 
     const channel = await client.channels.fetch(REPORT_CHANNEL_ID);
     const guild = channel.guild;
