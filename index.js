@@ -1,144 +1,192 @@
-const { Client, GatewayIntentBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, REST, Routes } = require('discord.js');
+const {
+    Client, GatewayIntentBits, ModalBuilder, TextInputBuilder, TextInputStyle,
+    ActionRowBuilder, REST, Routes, MessageFlags
+} = require('discord.js');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const express = require('express');
 require('dotenv').config();
 
-const app = express();
+// ================== KONFİQ ==================
 const PORT = process.env.PORT || 3000;
+const TOKEN = (process.env.DISCORD_TOKEN || '').trim();
+const SHEET_TITLE = 'Bot_Hesabatları';
+const DEBUG = process.env.DEBUG === '1'; // Render-də DEBUG=1 yazsan, ətraflı log çıxır
 
-// 1. Discord Bot Client (Yalnız Guilds Intent-i ilə)
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds
-    ] 
-});
+// Qlobal xətalar botu öldürməsin
+process.on('unhandledRejection', err => console.error('❌ Unhandled Rejection:', err));
+process.on('uncaughtException', err => console.error('❌ Uncaught Exception:', err));
 
-// 2. Google Auth Təhlükəsiz Quraşdırma
-function getGoogleDoc() {
-    try {
+// ================== GOOGLE SHEETS ==================
+let docCache = null;
+
+async function getSheet() {
+    if (!docCache) {
         let key = process.env.GOOGLE_PRIVATE_KEY || '';
-        if (key.includes('\\n')) {
-            key = key.replace(/\\n/g, '\n');
-        }
-        const serviceAccountAuth = new JWT({
+        if (key.includes('\\n')) key = key.replace(/\\n/g, '\n');
+
+        const auth = new JWT({
             email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-            key: key,
+            key,
             scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
-        return new GoogleSpreadsheet(process.env.SPREADSHEET_ID, serviceAccountAuth);
+        const doc = new GoogleSpreadsheet(process.env.SPREADSHEET_ID, auth);
+        await doc.loadInfo();
+        docCache = doc;
+        console.log(`📊 Google Sheets qoşuldu: "${doc.title}"`);
+    }
+    return docCache.sheetsByTitle[SHEET_TITLE] || docCache.sheetsByIndex[0];
+}
+
+// ================== DISCORD CLIENT ==================
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+if (DEBUG) {
+    client.on('debug', m => {
+        if (!m.includes('Heartbeat')) console.log('[DEBUG]', m);
+    });
+}
+client.on('error', e => console.error('[DISCORD ERROR]', e));
+client.on('warn', w => console.warn('[DISCORD WARN]', w));
+client.rest.on('rateLimited', r => console.warn('[RATELIMIT]', r));
+
+// ready / clientReady — hər iki versiyaya uyğun, yalnız 1 dəfə işləyir
+let readyHandled = false;
+async function onReady() {
+    if (readyHandled) return;
+    readyHandled = true;
+    console.log(`🤖 Bot ${client.user.tag} adı ilə AKTİV OLDU!`);
+
+    try {
+        const rest = new REST({ version: '10' }).setToken(TOKEN);
+        await rest.put(Routes.applicationCommands(client.user.id), {
+            body: [{ name: 'hesabat', description: 'Gündəlik iş hesabatı formasını açır' }]
+        });
+        console.log('✅ /hesabat komandası qeydiyyata alındı');
     } catch (err) {
-        console.error('❌ Google Auth Xətası:', err);
-        return null;
+        console.error('❌ Slash komanda xətası:', err);
+    }
+}
+client.once('ready', onReady);
+client.once('clientReady', onReady);
+
+// ================== INTERACTIONS ==================
+client.on('interactionCreate', async interaction => {
+    try {
+        // /hesabat -> Modal
+        if (interaction.isChatInputCommand() && interaction.commandName === 'hesabat') {
+            const modal = new ModalBuilder()
+                .setCustomId('hesabatModal')
+                .setTitle('Gündəlik İş Hesabatı');
+
+            const workInput = new TextInputBuilder()
+                .setCustomId('workInput')
+                .setLabel('Görülən İşlər')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+                .setMaxLength(2000);
+
+            const hoursInput = new TextInputBuilder()
+                .setCustomId('hoursInput')
+                .setLabel('Sərf Olunan Vaxt (Saat)')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('məs: 5')
+                .setRequired(true)
+                .setMaxLength(20);
+
+            const problemInput = new TextInputBuilder()
+                .setCustomId('problemInput')
+                .setLabel('Problem / Red Flag')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false)
+                .setMaxLength(1000);
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(workInput),
+                new ActionRowBuilder().addComponents(hoursInput),
+                new ActionRowBuilder().addComponents(problemInput)
+            );
+
+            return await interaction.showModal(modal);
+        }
+
+        // Modal submit -> Google Sheets
+        if (interaction.isModalSubmit() && interaction.customId === 'hesabatModal') {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+            const work = interaction.fields.getTextInputValue('workInput');
+            const hours = interaction.fields.getTextInputValue('hoursInput');
+            const problem = interaction.fields.getTextInputValue('problemInput') || 'Yoxdur';
+            const username = interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
+
+            const now = new Date();
+            const tarix = now.toLocaleDateString('az-AZ', { timeZone: 'Asia/Baku' });
+
+            try {
+                const sheet = await getSheet();
+                await sheet.addRow({
+                    'Tarix': tarix,
+                    'Adı': username,
+                    'İşlənilənlər': work,
+                    'İşləmə Saatı': hours,
+                    'Problemlər': problem,
+                    'Şəkil Linki': 'Şəkil yüklənməyib'
+                });
+
+                await interaction.editReply('✅ Hesabatınız Google Sheets cədvəlinə əlavə olundu!');
+                console.log(`📝 Hesabat yazıldı: ${username}`);
+            } catch (error) {
+                docCache = null; // növbəti cəhddə yenidən qoşulsun
+                console.error('❌ Google Sheets xətası:', error?.response?.data || error);
+                await interaction.editReply('❌ Cədvələ yazılarkən xəta baş verdi. Adminə bildirin.');
+            }
+        }
+    } catch (err) {
+        console.error('❌ Interaction xətası:', err);
+    }
+});
+
+// ================== WEB SERVER (Render üçün) ==================
+const app = express();
+app.get('/', (req, res) => {
+    res.send(client.isReady() ? `✅ Bot online: ${client.user.tag}` : '⏳ Bot hələ Discord-a qoşulmayıb');
+});
+
+// ================== START ==================
+async function diagnoseGateway() {
+    try {
+        const r = await fetch('https://discord.com/api/v10/gateway/bot', {
+            headers: { Authorization: `Bot ${TOKEN}` }
+        });
+        const body = (await r.text()).slice(0, 200);
+        console.log(`🌍 Gateway status: ${r.status} | ${body}`);
+
+        if (r.status === 401) console.error('❌ TOKEN SƏHVDİR! Developer Portal-dan yeni token al.');
+        if (r.status === 429 || body.includes('1015')) {
+            console.error('❌ Bu serverin IP-si Discord tərəfindən BLOKLANIB (Cloudflare). Redeploy et və ya hostinqi dəyiş.');
+        }
+    } catch (err) {
+        console.error('❌ Discord-a şəbəkə bağlantısı yoxdur:', err.message);
     }
 }
 
-client.once('ready', async () => {
-    console.log(`🤖 Bot ${client.user.tag} adı ilə UĞURLA AKTİV OLDU!`);
-    
-    try {
-        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-        await rest.put(
-            Routes.applicationCommands(client.user.id),
-            { body: [{ name: 'hesabat', description: 'Gündəlik iş hesabatı formasını açır' }] }
-        );
-        console.log('✅ Slash komandaları (/hesabat) uğurla qeydiyyata alındı!');
-    } catch (err) {
-        console.error('❌ Slash komandaları xətası:', err);
-    }
-});
-
-client.on('interactionCreate', async interaction => {
-    if (interaction.isChatInputCommand() && interaction.commandName === 'hesabat') {
-        const modal = new ModalBuilder()
-            .setCustomId('hesabatModal')
-            .setTitle('Gündəlik İş Hesabatı');
-
-        const workInput = new TextInputBuilder()
-            .setCustomId('workInput')
-            .setLabel('Görülən İşlər (İşlənilənlər)')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true);
-
-        const hoursInput = new TextInputBuilder()
-            .setCustomId('hoursInput')
-            .setLabel('Sərf Olunan Vaxt (Saat)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('məs: 5 saat')
-            .setRequired(true);
-
-        const problemInput = new TextInputBuilder()
-            .setCustomId('problemInput')
-            .setLabel('Qarşılaşdığınız Problem / Red Flag')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false);
-
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(workInput),
-            new ActionRowBuilder().addComponents(hoursInput),
-            new ActionRowBuilder().addComponents(problemInput)
-        );
-
-        await interaction.showModal(modal);
-    }
-
-    if (interaction.isModalSubmit() && interaction.customId === 'hesabatModal') {
-        const work = interaction.fields.getTextInputValue('workInput');
-        const hours = interaction.fields.getTextInputValue('hoursInput');
-        const problem = interaction.fields.getTextInputValue('problemInput') || 'Yoxdur';
-        const username = interaction.user.displayName || interaction.user.username;
-
-        await interaction.deferReply({ ephemeral: true });
-
-        try {
-            const doc = getGoogleDoc();
-            if (!doc) {
-                return await interaction.editReply({ content: '❌ Google Sheets bağlantı xətası!' });
-            }
-            await doc.loadInfo();
-            const sheet = doc.sheetsByTitle['Bot_Hesabatları'] || doc.sheetsByIndex[0];
-
-            await sheet.addRow({
-                'Tarix': new Date().toLocaleDateString('az-AZ'),
-                'Adı': username,
-                'İşlənilənlər': work,
-                'İşləmə Saatı': hours,
-                'Problemlər': problem,
-                'Şəkil Linki': 'Şəkil yüklənməyib'
-            });
-
-            await interaction.editReply({ 
-                content: '✅ Hesabatınız Google Sheets cədvəlinə əlavə olundu!\n📸 Əgər skrinşot/şəkil göndərmək istəyirsinizsə, şəkli birbaşa bota və ya bu kanala atın.' 
-            });
-        } catch (error) {
-            console.error('Google Sheets Xətası:', error);
-            await interaction.editReply({ content: '❌ Cədvələ yazılarkən xəta baş verdi.' });
-        }
-    }
-});
-
-app.get('/', (req, res) => res.send('Bot 7/24 Aktifdir!'));
-
 app.listen(PORT, async () => {
-    console.log(`🌐 Web server ${PORT} portunda dinlənilir...`);
-    
-    const token = (process.env.DISCORD_TOKEN || '').trim();
-    console.log(`🔑 Token Uzunluğu: ${token.length} simvol`);
+    console.log(`🌐 Web server ${PORT} portunda işləyir`);
 
-    if (!token) {
-        console.error('❌ DISCORD_TOKEN TAPILMADI!');
-        return;
-    }
+    if (!TOKEN) return console.error('❌ DISCORD_TOKEN TAPILMADI!');
+    console.log(`🔑 Token uzunluğu: ${TOKEN.length}`);
+
+    await diagnoseGateway();
 
     const timeout = setTimeout(() => {
-        console.error('⚠️ TIMEOUT: Discord Gateway 10 saniyə ərzində cavab vermədi!');
-    }, 10000);
+        console.error('⚠️ 15 saniyədir Discord cavab vermir. DEBUG=1 qoyub logları yoxla.');
+    }, 15000);
 
     try {
-        console.log('🔑 Discord API-yə qoşulunur...');
-        await client.login(token);
+        console.log('🔑 Discord-a qoşulur...');
+        await client.login(TOKEN);
         clearTimeout(timeout);
-        console.log('⚡ Discord API bağlantısı tam quruldu!');
+        console.log('⚡ Discord login uğurlu');
     } catch (err) {
         clearTimeout(timeout);
         console.error('❌ DISCORD LOGIN XƏTASI:', err);
