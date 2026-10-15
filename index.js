@@ -19,7 +19,6 @@ const DEBUG = process.env.DEBUG === '1';
 // Xatırlatma ayarları (.env-dən)
 const REPORT_CHANNEL_ID = (process.env.REPORT_CHANNEL_ID || '').trim(); // xəbərdarlıq yazılacaq kanal
 const TEAM_ROLE_ID = (process.env.TEAM_ROLE_ID || '').trim();           // hesabat yazmalı olan rol
-const SKIP_WEEKENDS = process.env.SKIP_WEEKENDS === '1';                // 1 = şənbə/bazar yoxlanmır
 const REMINDER_CRON = process.env.REMINDER_CRON || '59 23 * * *';       // hər gün 23:59
 const TIMEZONE = 'Asia/Baku';
 
